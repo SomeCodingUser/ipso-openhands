@@ -1,29 +1,22 @@
 @echo off
-REM OpenHands with WorktreeRuntime (V0 Legacy Server)
-REM This bypasses the V1 app_server/agent_server architecture
+REM OpenHands Simple Launcher (Podman + Windows)
+REM Backend: Podman Linux Container | Frontend: Windows Native
 
-REM Load environment from .env file if it exists
-if exist ".env" (
-    for /f "usebackq tokens=*" %%a in (".env") do (
-        echo %%a | findstr /b "#" >nul || set "%%a"
-    )
-)
-
-REM Set defaults
-if "%RUNTIME%"=="" set RUNTIME=worktree
-if "%BACKEND_HOST%"=="" set BACKEND_HOST=127.0.0.1
-if "%BACKEND_PORT%"=="" set BACKEND_PORT=3000
-if "%FRONTEND_PORT%"=="" set FRONTEND_PORT=3001
-
-echo ============================================
-echo OpenHands with WorktreeRuntime
-echo ============================================
-echo RUNTIME=%RUNTIME%
-echo BACKEND_HOST=%BACKEND_HOST%
-echo BACKEND_PORT=%BACKEND_PORT%
+echo Starting OpenHands with WorktreeRuntime...
 echo.
 
-REM Build frontend if not exists
+set BACKEND_PORT=3000
+set FRONTEND_PORT=3001
+set CONTAINER_NAME=openhands-worktree
+set IMAGE_NAME=openhands-worktree:latest
+
+REM Generate secret key if needed
+if not exist ".env" (
+    powershell -Command "$k = -join ((1..64) | ForEach-Object { Get-Random -Maximum 16 | ForEach-Object { '{0:x}' -f $_ } }); "OH_SECRET_KEY=$k" | Out-File -FilePath '.env' -Encoding ASCII" >nul 2>&1
+)
+for /f "usebackq tokens=*" %%a in (".env") do set "%%a"
+
+REM Build frontend if needed
 if not exist "frontend\build\index.html" (
     echo Building frontend...
     cd frontend
@@ -32,41 +25,46 @@ if not exist "frontend\build\index.html" (
     cd ..
 )
 
-REM Kill any existing processes on these ports
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%BACKEND_PORT%"') do (
-    taskkill /F /PID %%a >nul 2>&1
-)
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":%FRONTEND_PORT%"') do (
-    taskkill /F /PID %%a >nul 2>&1
+REM Clean up existing container
+podman stop %CONTAINER_NAME% >nul 2>&1
+podman rm %CONTAINER_NAME% >nul 2>&1
+
+REM Build image if needed
+podman image exists %IMAGE_NAME% >nul 2>&1
+if %ERRORLEVEL% neq 0 (
+    echo Building container image...
+    podman build -t %IMAGE_NAME% -f Containerfile .
 )
 
-REM Start Backend (V0 Legacy Server - directly uses WorktreeRuntime)
-echo Starting backend (V0 Legacy Server)...
-start "OpenHands Backend" cmd /k "set RUNTIME=%RUNTIME%&& uv run uvicorn openhands.server.listen:app --host %BACKEND_HOST% --port %BACKEND_PORT%"
+REM Create workspace
+if not exist "workspace" mkdir workspace
+
+REM Start backend in Podman
+echo Starting backend in Podman container...
+start "OpenHands Backend" cmd /k "podman run -it --rm --name %CONTAINER_NAME% -p %BACKEND_PORT%:%BACKEND_PORT% -e RUNTIME=worktree -e BACKEND_HOST=0.0.0.0 -e BACKEND_PORT=%BACKEND_PORT% -e OH_SECRET_KEY=%OH_SECRET_KEY% -e PYTHONUNBUFFERED=1 -v ""%CD%\workspace:/workspace"" -v ""%USERPROFILE%\.gitconfig:/root/.gitconfig:ro"" %IMAGE_NAME%"
 
 REM Wait for backend
-echo Waiting for backend...
-timeout /t 10 /nobreak >nul
+timeout /t 15 /nobreak >nul
 
-REM Start Frontend
-echo Starting frontend...
-start "OpenHands Frontend" cmd /k "cd frontend&& set VITE_BACKEND_HOST=%BACKEND_HOST%:%BACKEND_PORT%&& npm run dev -- --port %FRONTEND_PORT% --host %BACKEND_HOST%"
+REM Start frontend on Windows
+echo Starting frontend on Windows...
+start "OpenHands Frontend" cmd /k "cd frontend ^&^& set VITE_BACKEND_HOST=127.0.0.1:%BACKEND_PORT% ^&^& npm run dev -- --port %FRONTEND_PORT% --host 127.0.0.1"
 
 REM Wait for frontend
 timeout /t 10 /nobreak >nul
 
 REM Open browser
-start http://%BACKEND_HOST%:%FRONTEND_PORT%
+start http://127.0.0.1:%FRONTEND_PORT%
 
 echo.
-echo ============================================
 echo OpenHands is running!
-echo Backend: http://%BACKEND_HOST%:%BACKEND_PORT%
-echo Frontend: http://%BACKEND_HOST%:%FRONTEND_PORT%
-echo ============================================
+echo Backend:  http://127.0.0.1:%BACKEND_PORT% (Podman Linux)
+echo Frontend: http://127.0.0.1:%FRONTEND_PORT% (Windows)
 echo.
-echo NOTE: Using V0 Legacy Server with WorktreeRuntime
-echo (bypasses V1 app_server/agent_server architecture)
-echo.
-echo Close the backend and frontend windows to stop.
-pause
+echo Press any key to stop...
+pause >nul
+
+REM Stop everything
+taskkill /F /FI "WINDOWTITLE eq OpenHands Frontend*" >nul 2>&1
+podman stop %CONTAINER_NAME% >nul 2>&1
+echo Stopped.
