@@ -77,8 +77,22 @@ from openhands.runtime.utils.system_stats import (
 )
 from openhands.utils.async_utils import call_sync_from_async, wait_all
 
-if sys.platform == 'win32':
-    from openhands.runtime.utils.windows_bash import WindowsPowershellSession
+# Windows PowerShell support - loaded lazily to avoid import errors when not needed
+_WindowsPowershellSession = None
+
+
+def _get_windows_powershell_session():
+    """Lazy import of Windows PowerShell support."""
+    global _WindowsPowershellSession
+    if _WindowsPowershellSession is None and sys.platform == 'win32':
+        try:
+            from openhands.runtime.utils.windows_bash import (
+                WindowsPowershellSession,
+            )
+            _WindowsPowershellSession = WindowsPowershellSession
+        except Exception:
+            pass
+    return _WindowsPowershellSession
 
 
 class ActionRequest(BaseModel):
@@ -268,14 +282,32 @@ class ActionExecutor:
 
     def _create_bash_session(self, cwd: str | None = None):
         if sys.platform == 'win32':
-            return WindowsPowershellSession(  # type: ignore[name-defined]
-                work_dir=cwd or self._initial_cwd,
-                username=self.username,
-                no_change_timeout_seconds=int(
-                    os.environ.get('NO_CHANGE_TIMEOUT_SECONDS', 10)
-                ),
-                max_memory_mb=self.max_memory_gb * 1024 if self.max_memory_gb else None,
-            )
+            # Try to use Windows PowerShell, fallback to regular subprocess
+            WindowsPowershellSessionCls = _get_windows_powershell_session()
+            if WindowsPowershellSessionCls is not None:
+                return WindowsPowershellSessionCls(
+                    work_dir=cwd or self._initial_cwd,
+                    username=self.username,
+                    no_change_timeout_seconds=int(
+                        os.environ.get('NO_CHANGE_TIMEOUT_SECONDS', 10)
+                    ),
+                    max_memory_mb=self.max_memory_gb * 1024 if self.max_memory_gb else None,
+                )
+            else:
+                # Fallback: use regular subprocess-based session for Windows without PowerShell
+                logger.warning('PowerShell not available, using subprocess fallback')
+                # Create a simple subprocess session
+                from openhands.runtime.utils.bash import BashSession
+                bash_session = BashSession(
+                    work_dir=cwd or self._initial_cwd,
+                    username=self.username,
+                    no_change_timeout_seconds=int(
+                        os.environ.get('NO_CHANGE_TIMEOUT_SECONDS', 10)
+                    ),
+                    max_memory_mb=self.max_memory_gb * 1024 if self.max_memory_gb else None,
+                )
+                bash_session.initialize()
+                return bash_session
         else:
             bash_session = BashSession(
                 work_dir=cwd or self._initial_cwd,
