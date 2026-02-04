@@ -54,37 +54,26 @@ from openhands.runtime.runtime_status import RuntimeStatus
 if TYPE_CHECKING:
     from openhands.runtime.utils.windows_bash import WindowsPowershellSession
 
-# Import Windows PowerShell support if on Windows
-if sys.platform == 'win32':
-    try:
-        from openhands.runtime.utils.windows_exceptions import DotNetMissingError
-        from openhands.runtime.utils.windows_bash import WindowsPowershellSession  # isort: skip
-    except (ImportError, DotNetMissingError) as err:
-        # Print a user-friendly error message without stack trace
-        friendly_message = """
-ERROR: PowerShell and .NET SDK are required but not properly configured
+# Windows PowerShell support - loaded lazily to avoid import errors when not needed
+_WindowsPowershellSession = None
+_windows_import_error = None
 
-The .NET SDK and PowerShell are required for OpenHands CLI on Windows.
-PowerShell integration cannot function without .NET Core.
 
-Please install the .NET SDK by following the instructions at:
-https://docs.all-hands.dev/usage/windows-without-wsl
-
-After installing .NET SDK, restart your terminal and try again.
-"""
-        print(friendly_message, file=sys.stderr)
-        logger.error(
-            f'Windows runtime initialization failed: {type(err).__name__}: {str(err)}'
-        )
-        if (
-            isinstance(err, DotNetMissingError)
-            and hasattr(err, 'details')
-            and err.details
-        ):
-            logger.debug(f'Details: {err.details}')
-
-        # Exit the program with an error code
-        sys.exit(1)
+def _get_windows_powershell_session():
+    """Lazy import of Windows PowerShell support."""
+    global _WindowsPowershellSession, _windows_import_error
+    if _windows_import_error:
+        raise _windows_import_error
+    if _WindowsPowershellSession is None and sys.platform == 'win32':
+        try:
+            from openhands.runtime.utils.windows_bash import (
+                WindowsPowershellSession,  # isort: skip
+            )
+            _WindowsPowershellSession = WindowsPowershellSession
+        except Exception as err:
+            _windows_import_error = err
+            raise
+    return _WindowsPowershellSession
 
 
 class CLIRuntime(Runtime):
@@ -157,7 +146,7 @@ class CLIRuntime(Runtime):
 
         # Initialize PowerShell session on Windows
         self._is_windows = sys.platform == 'win32'
-        self._powershell_session: WindowsPowershellSession | None = None
+        self._powershell_session: 'WindowsPowershellSession | None' = None
 
         logger.warning(
             'Initializing CLIRuntime. WARNING: NO SANDBOX IS USED. '
@@ -177,7 +166,8 @@ class CLIRuntime(Runtime):
 
         # Initialize PowerShell session if on Windows
         if self._is_windows:
-            self._powershell_session = WindowsPowershellSession(
+            WindowsPowershellSessionCls = _get_windows_powershell_session()
+            self._powershell_session = WindowsPowershellSessionCls(
                 work_dir=self._workspace_path,
                 username=None,  # Use current user
                 no_change_timeout_seconds=30,

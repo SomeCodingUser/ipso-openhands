@@ -1,14 +1,26 @@
 import importlib
 
 from openhands.runtime.base import Runtime
-from openhands.runtime.impl.cli.cli_runtime import CLIRuntime
 from openhands.runtime.impl.docker.docker_runtime import (
     DockerRuntime,
 )
 from openhands.runtime.impl.kubernetes.kubernetes_runtime import KubernetesRuntime
 from openhands.runtime.impl.local.local_runtime import LocalRuntime
 from openhands.runtime.impl.remote.remote_runtime import RemoteRuntime
+from openhands.runtime.impl.worktree.worktree_runtime import WorktreeRuntime
 from openhands.utils.import_utils import get_impl
+
+# Lazy imports for runtimes with complex dependencies
+_CLIRuntime = None
+
+
+def _get_cli_runtime():
+    global _CLIRuntime
+    if _CLIRuntime is None:
+        from openhands.runtime.impl.cli.cli_runtime import CLIRuntime
+        _CLIRuntime = CLIRuntime
+    return _CLIRuntime
+
 
 # mypy: disable-error-code="type-abstract"
 _DEFAULT_RUNTIME_CLASSES: dict[str, type[Runtime]] = {
@@ -17,7 +29,8 @@ _DEFAULT_RUNTIME_CLASSES: dict[str, type[Runtime]] = {
     'remote': RemoteRuntime,
     'local': LocalRuntime,
     'kubernetes': KubernetesRuntime,
-    'cli': CLIRuntime,
+    'cli': None,  # Will be resolved lazily
+    'worktree': WorktreeRuntime,
 }
 
 # Try to import third-party runtimes if available
@@ -92,12 +105,17 @@ def get_runtime_cls(name: str) -> type[Runtime]:
     Otherwise attempt to resolve name as subclass of Runtime and return it.
     Raise on invalid selections.
     """
+    if name == 'cli':
+        return _get_cli_runtime()
     if name in _ALL_RUNTIME_CLASSES:
-        return _ALL_RUNTIME_CLASSES[name]
+        runtime_cls = _ALL_RUNTIME_CLASSES[name]
+        if runtime_cls is not None:
+            return runtime_cls
     try:
         return get_impl(Runtime, name)
     except Exception as e:
-        known_keys = _ALL_RUNTIME_CLASSES.keys()
+        known_keys = [k for k in _ALL_RUNTIME_CLASSES.keys() if k != 'cli']
+        known_keys.append('cli')
         raise ValueError(
             f'Runtime {name} not supported, known are: {known_keys}'
         ) from e
@@ -109,8 +127,8 @@ __all__ = [
     'RemoteRuntime',
     'DockerRuntime',
     'KubernetesRuntime',
-    'CLIRuntime',
     'LocalRuntime',
+    'WorktreeRuntime',
     'get_runtime_cls',
 ]
 
