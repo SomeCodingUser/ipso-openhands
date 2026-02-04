@@ -1,3 +1,4 @@
+import os
 from typing import AsyncGenerator
 
 from fastapi import Request
@@ -19,6 +20,8 @@ from openhands.app_server.services.injector import InjectorState
 
 
 def get_default_sandbox_specs():
+    # Pass through RUNTIME from parent environment to agent server
+    runtime = os.getenv('RUNTIME', 'worktree')
     return [
         SandboxSpecInfo(
             id=get_agent_server_image(),
@@ -26,6 +29,8 @@ def get_default_sandbox_specs():
             initial_env={
                 # VSCode disabled for now
                 'OH_ENABLE_VS_CODE': '0',
+                # Pass through the runtime setting
+                'RUNTIME': runtime,
                 **get_agent_server_env(),
             },
             working_dir='',
