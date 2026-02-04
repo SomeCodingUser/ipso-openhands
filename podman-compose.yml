@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  openhands:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: openhands-worktree:latest
+    container_name: openhands-worktree
+    ports:
+      - "3000:3000"  # Backend
+      - "3001:3001"  # Frontend
+    environment:
+      - RUNTIME=worktree
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=3000
+      - FRONTEND_PORT=3001
+      - OH_SECRET_KEY=${OH_SECRET_KEY:-change_me_in_production}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Mount workspace directory for persistence
+      - ./workspace:/workspace
+      # Mount git config for repository access
+      - ~/.gitconfig:/root/.gitconfig:ro
+    working_dir: /app
+    restart: unless-stopped
+    # Required for proper signal handling
+    init: true
+    # Keep container running
+    stdin_open: true
+    tty: true
