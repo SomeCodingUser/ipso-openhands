@@ -167,6 +167,9 @@ def config_from_env() -> AppServerConfig:
     from openhands.app_server.sandbox.remote_sandbox_spec_service import (
         RemoteSandboxSpecServiceInjector,
     )
+    from openhands.app_server.sandbox.worktree_sandbox_service import (
+        WorktreeSandboxServiceInjector,
+    )
     from openhands.app_server.user.auth_user_context import (
         AuthUserContextInjector,
     )
@@ -192,7 +195,10 @@ def config_from_env() -> AppServerConfig:
                 api_key=os.environ['SANDBOX_API_KEY'],
                 api_url=os.environ['SANDBOX_REMOTE_RUNTIME_API_URL'],
             )
-        elif os.getenv('RUNTIME') in ('local', 'process', 'worktree'):
+        elif os.getenv('RUNTIME') == 'worktree':
+            # Use worktree sandbox - doesn't require agent server (fcntl)
+            config.sandbox = WorktreeSandboxServiceInjector()
+        elif os.getenv('RUNTIME') in ('local', 'process'):
             config.sandbox = ProcessSandboxServiceInjector()
         else:
             # Support legacy environment variables for Docker sandbox configuration
